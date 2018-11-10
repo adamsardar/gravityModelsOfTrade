@@ -1,0 +1,117 @@
+Gravity Models Of Trade
+=====================================
+author: Adam Sardar
+date: 10-Nov-2018
+autosize: true
+width: 1440
+height: 900
+
+Gravity models of trade in the news
+====================================
+
+There is a lot of disussion currently in the UK regarding trade ...
+
+![The Economist](EconomistScreenShot.png)
+
+```{r, echo=FALSE}
+
+library(data.table)
+library(broom)
+library(ggplot2)
+library(readxl)
+library(rvest)
+library(ggrepel)
+library(stringr)
+library(wesanderson)
+```
+
+A simple inverse relation between distance and volume of trade
+================================================================
+
+One of the most reproducible trends in macroeconomics
+
+Two countries $i$ and $j$, with economies of size $M_i$ and $M_j$, seperated by a distance $D_{ij}$
+
+$$ F_{ij} = G \frac{M_i M_j}{D_{ij}}$$
+
+Presented in 1962 by Jan Tinbergen: the size of bilateral trade flows between any two countries can be approximated by employing the ‘gravity equation’, which is derived from Newton’s theory of gravitation.
+
+$$ \log(F_{ij}) = \log(G) + \log(M_i) +  \log \left ( \frac{M_j}{ D_{ij} } \right )$$
+
+Records regarding UK trade in goods are collated by ONS 
+=======================================================
+
+```{r Trade in goods 2011-2016}
+
+download.file(
+  paste0("https://www.ons.gov.uk/file?uri=",
+         "/economy/nationalaccounts/balanceofpayments/datasets/",
+         "tradeingoodscountrybycommodityimports/2011to2016/",
+         "countrybycommodityimports.xlsx"),
+  destfile = "/tmp/tradeInGoods_import.xlsx")
+
+goods_imports <- read_xlsx("/tmp/tradeInGoods_import.xlsx") %>%
+  data.table(check.names = TRUE)
+
+head(goods_imports[Country.description %like% "United States",
+.(Commodity=Commodity.description, Code=Country.code, Direction,
+  `2011` = X2011, `2012` = X2012, `2013` = X2013)])
+```
+
+
+
+```{r echo = FALSE}
+download.file(
+  paste0("https://www.ons.gov.uk/file?uri=",
+         "/economy/nationalaccounts/balanceofpayments/datasets/",
+         "tradeingoodscountrybycommodityexports/2011to2016/",
+         "countrybycommodityexports.xlsx"),
+  destfile = "/tmp/tradeInGoods_export.xlsx")
+
+goods_exports <- read_xlsx("/tmp/tradeInGoods_export.xlsx") %>%
+  data.table(check.names = TRUE)
+```
+
+GDP data from the world bank
+============================
+
+```{r World Bank GDP}
+
+GDPbyCountry <- 
+  fread("http://databank.worldbank.org/data/download/GDP.csv", 
+        skip = 3, check.names = TRUE, 
+        header = TRUE, key = "Economy") %>% 
+  .[Economy != ""]
+
+setnames(GDPbyCountry, "V1", "Code")
+
+GDPbyCountry[, GDP := as.numeric(gsub(",", "", US.dollars.))]
+
+GDPbyCountry["United States",
+             Economy := "United States inc Puerto Rico"]
+
+head(GDPbyCountry[,.(Code, Economy, GDP)])
+```
+
+Commonwealth countries can be scraped from WikiPedia
+====================================================
+
+```{r Commonwealth countries}
+
+commonwealthCountries <- 
+paste0("https://en.wikipedia.org/wiki/",
+       "Member_states_of_the_Commonwealth_of_Nations") %>%
+  read_html() %>%
+  html_nodes(xpath='/html/body/div[3]/div[3]/div[4]/div/table[1]') %>%
+  html_table() %>%
+  .[[1]]
+
+setDT(commonwealthCountries)
+
+commonwealthCountries[, nation := str_extract(Country, "[^!]+") %>%
+                                  str_remove("\\s+$") %>%
+                                  str_remove("\\[D\\]")]
+
+head(commonwealthCountries[,.(nation, Joined)])
+```
+
