@@ -1,0 +1,161 @@
+---
+title: "Gravity Models Of Trade"
+author: "Adam Sardar"
+date: "22 May 2018"
+output: html_document
+---
+
+A recent [Economist](https://www.economist.com/finance-and-economics/2016/09/29/down-to-earth) article pointed out that gravity models of trade should be an easy thing to plot and estimate using linear models. I thought that it'd be fun to try out.
+
+
+```{r}
+
+library(data.table)
+library(broom)
+library(ggplot2)
+library(readxl)
+library(rvest)
+library(ggrepel)
+library(wesanderson)
+```
+
+
+Trade in goods 2011-2016
+
+```{r}
+
+download.file("https://www.ons.gov.uk/file?uri=/economy/nationalaccounts/balanceofpayments/datasets/tradeingoodscountrybycommodityimports/2011to2016/countrybycommodityimports.xlsx", destfile = "/tmp/tradeInGoods_import.xlsx")
+
+goods_imports <- read_xlsx("/tmp/tradeInGoods_import.xlsx") %>% data.table(check.names = TRUE)
+
+download.file("https://www.ons.gov.uk/file?uri=/economy/nationalaccounts/balanceofpayments/datasets/tradeingoodscountrybycommodityexports/2011to2016/countrybycommodityexports.xlsx", destfile = "/tmp/tradeInGoods_export.xlsx")
+
+goods_exports <- read_xlsx("/tmp/tradeInGoods_export.xlsx") %>% data.table(check.names = TRUE)
+```
+
+
+Trade in services 2017
+
+```{r}
+
+download.file("https://www.ons.gov.uk/file?uri=/businessindustryandtrade/internationaltrade/datasets/internationaltradeinservicesbycountry/current/q4itisbycountry1.xls", destfile = "/tmp/tradeInServices_export.xls")
+
+services_trade <- read_xls("/tmp/tradeInServices_export.xls", skip = 2) %>% data.table(check.names = TRUE)
+
+services_trade %<>% .[X__3 != "<NA>"] %>% .[,.SD, .SDcols = ! c("X__1","X__2")]
+
+setnames(services_trade, "X__3", "country")
+
+services_trade %<>% .[,lapply(.SD,as.numeric), by = country]
+
+services_exports <-
+services_trade[,.(exportsServiecs2017 =sum(c(X2017.Q1,X2017.Q2,X2017.Q3,X2017.Q4), na.rm = TRUE)), by = country]
+
+```
+
+Inter country data taken from: http://egallic.fr/en/closest-distance-between-countries/
+
+```{r}
+
+load(url("http://egallic.fr/R/Blog/Cartes/countries_distances.RData"))
+setDT(lesDist)
+head(lesDist)
+
+GBdists <- lesDist[pays1 == "Isle of Wight"][,.(country = pays2, dist)]
+
+GBdists[country == "USA", country := "United States inc Puerto Rico"]
+GBdists[country == "USSR", country := "Russia"]
+```
+
+
+```{r}
+
+GDPbyCountry <- fread("http://databank.worldbank.org/data/download/GDP.csv", skip = 3, check.names = TRUE)
+
+GDPbyCountry %<>% .[Economy != ""]
+
+GDPbyCountry[, GDP := as.numeric(US.dollars. %>% str_replace_all(",",""))]
+
+GDPbyCountry[Economy == "United States", Economy := "United States inc Puerto Rico"]
+
+```
+
+```{r}
+
+commonwealthCountries <- "https://en.wikipedia.org/wiki/Member_states_of_the_Commonwealth_of_Nations" %>%
+  read_html() %>%
+  html_nodes(xpath='/html/body/div[3]/div[3]/div[4]/div/table[1]') %>%
+  html_table() %>%
+  .[[1]]
+
+setDT(commonwealthCountries)
+
+commonwealthCountries[, nation := str_extract(Country, "[^!]+") %>% str_remove("\\s+$")]
+```
+
+
+```{r}
+
+EUCountries <- "https://en.wikipedia.org/wiki/Member_state_of_the_European_Union" %>%
+  read_html() %>%
+  html_nodes(xpath= '/html/body/div[3]/div[3]/div[4]/div/table[2]') %>%
+  html_table() %>%
+  .[[1]]
+
+setDT(EUCountries)
+setnames(EUCountries, "Country name", "nation")
+```
+
+```{r}
+
+totalExportsOverYears <- goods_exports[, lapply(.SD, sum),
+             by = .(Country.code, country = Country.description),.SDcols = c("X2011","X2012","X2013","X2014","X2015","X2016")]
+
+UKtradeTo <- totalExportsOverYears %>% merge(GBdists, by = "country") %>% merge(GDPbyCountry[,.(Economy,GDP)], by.x = "country", by.y = "Economy")
+
+UKtradeTo[, type := "other"]
+UKtradeTo[country %in% commonwealthCountries$nation, type := "commonwealth"]
+UKtradeTo[country %in% EUCountries$nation, type := "EU"]
+UKtradeTo[country == "United States inc Puerto Rico", type := "USA"]
+
+UK_GDP <- GDPbyCountry[Economy == "United Kingdom", GDP]
+
+
+UKtradeTo %>% ggplot(aes(x = log2(GDP) - log2(dist), y = log2(X2014) )) +
+  geom_point(aes(colour = type, shape = type), size = 3) +
+  geom_label_repel(aes(label = country)) +
+  theme_bw() +
+  labs(title = "UK 2014 exports (goods only) expressed as a gravity trade model",
+       subtitle = "GDP data from the IMF, UK export data from ONS",
+       x = "log2(GDP of importing country / distance)", y = "log2(value exported)")
+
+```
+
+
+```{r}
+
+totalServicesExports2017 <-services_exports
+
+totalServicesExports2017[country == "USA", country := "United States inc Puerto Rico"]
+totalServicesExports2017[country == "USSR", country := "Russia"]
+
+UKtradeToServices <- totalServicesExports2017 %>% merge(GBdists, by = "country") %>% merge(GDPbyCountry[,.(Economy,GDP)], by.x = "country", by.y = "Economy")
+
+UKtradeToServices[, type := "other"]
+UKtradeToServices[country %in% commonwealthCountries$nation, type := "commonwealth"]
+UKtradeToServices[country %in% EUCountries$nation, type := "EU"]
+UKtradeToServices[country == "United States inc Puerto Rico", type := "USA"]
+
+UK_GDP <- GDPbyCountry[Economy == "United Kingdom", GDP]
+
+
+UKtradeToServices %>% ggplot(aes(x = log2(GDP) - log2(dist), y = log2(exportsServiecs2017) )) +
+  geom_point(aes(colour = type, shape = type), size = 3) +
+  geom_label_repel(aes(label = country)) +
+  theme_bw() +
+  labs(title = "UK 2017 exports (services only) expressed as a gravity trade model",
+       subtitle = "GDP data from the IMF, UK export data from ONS",
+       x = "log2(GDP of importing country / distance)", y = "log2(value exported)")
+
+```
+
