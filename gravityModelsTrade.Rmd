@@ -2,7 +2,7 @@
 title: "Gravity Models Of Trade"
 author: "Adam Sardar"
 date: "22 May 2018"
-output: html_document
+output: pdf_document
 ---
 
 A recent [Economist](https://www.economist.com/finance-and-economics/2016/09/29/down-to-earth) article pointed out that gravity models of trade should be an easy thing to plot and estimate using linear models. I thought that it'd be fun to try out.
@@ -40,16 +40,19 @@ Trade in services 2017
 
 download.file("https://www.ons.gov.uk/file?uri=/businessindustryandtrade/internationaltrade/datasets/internationaltradeinservicesbycountry/current/q4itisbycountry1.xls", destfile = "/tmp/tradeInServices_export.xls")
 
-services_trade <- read_xls("/tmp/tradeInServices_export.xls", skip = 2) %>% data.table(check.names = TRUE)
+services_trade <- read_xls("/tmp/tradeInServices_export.xls", skip = 2) %>% 
+  data.table(check.names = TRUE)
 
 services_trade %<>% .[X__3 != "<NA>"] %>% .[,.SD, .SDcols = ! c("X__1","X__2")]
 
 setnames(services_trade, "X__3", "country")
 
-services_trade %<>% .[,lapply(.SD,as.numeric), by = country]
+services_trade <- services_trade[,lapply(.SD, as.numeric), by = country]
 
 services_exports <-
-services_trade[,.(exportsServiecs2017 =sum(c(X2017.Q1,X2017.Q2,X2017.Q3,X2017.Q4), na.rm = TRUE)), by = country]
+  services_trade[ ,.(exportsServiecs2017 = sum( c(X2017.Q1, X2017.Q2, X2017.Q3, X2017.Q4),
+                                               na.rm = TRUE)),
+               by = country]
 
 ```
 
@@ -68,16 +71,15 @@ GBdists[country == "USSR", country := "Russia"]
 ```
 
 
-```{r}
+```{r World Bank GDP}
 
-GDPbyCountry <- fread("http://databank.worldbank.org/data/download/GDP.csv", skip = 3, check.names = TRUE)
+GDPbyCountry <- fread("http://databank.worldbank.org/data/download/GDP.csv", 
+                      skip = 3, check.names = TRUE)
 
 GDPbyCountry %<>% .[Economy != ""]
-
 GDPbyCountry[, GDP := as.numeric(US.dollars. %>% str_replace_all(",",""))]
 
 GDPbyCountry[Economy == "United States", Economy := "United States inc Puerto Rico"]
-
 ```
 
 ```{r}
