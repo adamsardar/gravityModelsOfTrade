@@ -3,8 +3,8 @@ Gravity Models Of Trade
 author: Adam Sardar
 date: 10-Nov-2018
 autosize: true
-width: 1440
-height: 900
+width: 1920
+height: 1080
 
 Gravity models of trade in the news
 ====================================
@@ -93,16 +93,30 @@ GDPbyCountry["United States",
 head(GDPbyCountry[,.(Code, Economy, GDP)])
 ```
 
-Commonwealth countries can be scraped from WikiPedia
-====================================================
+EU countries can be scraped from Wikipedia
+==========================================
 
-```{r Commonwealth countries}
+```{r EU Countries}
+
+EUCountries <- "https://en.wikipedia.org/wiki/Member_state_of_the_European_Union" %>%
+  read_html() %>%
+  html_nodes(xpath= '/html/body/div[3]/div[3]/div[4]/div/table[2]') %>%
+  html_table() %>%
+  .[[1]]
+
+setDT(EUCountries)
+setnames(EUCountries, "Country name", "nation")
+
+head(EUCountries[,.(nation, Capital, Accession)])
+```
+
+```{r Commonwealth countries, echo = FALSE}
 
 commonwealthCountries <- 
 paste0("https://en.wikipedia.org/wiki/",
        "Member_states_of_the_Commonwealth_of_Nations") %>%
   read_html() %>%
-  html_nodes(xpath='/html/body/div[3]/div[3]/div[4]/div/table[1]') %>%
+html_nodes(xpath='/html/body/div[3]/div[3]/div[4]/div/table[1]') %>%
   html_table() %>%
   .[[1]]
 
@@ -115,3 +129,76 @@ commonwealthCountries[, nation := str_extract(Country, "[^!]+") %>%
 head(commonwealthCountries[,.(nation, Joined)])
 ```
 
+Big data is bad data!
+=====================
+
+```{r Intrcountry distances, echo=FALSE}
+
+# Inter country data taken from: http://egallic.fr/en/closest-distance-between-countries/
+lesDist <- fread("https://gist.githubusercontent.com/mtriff/185e15be85b44547ed110e412a1771bf/raw/1bb4d287f79ca07f63d4c56110099c26e7c6ee7d/countries_distances.csv")
+
+GBdists <- lesDist[pays1 == "UK"][,.(country = pays2, dist)]
+
+GBdists[country == "USA", country := "United States inc Puerto Rico"]
+```
+
+```{r Merge disperate datasets}
+
+totalExportsOverYears <- 
+   goods_exports[Commodity.description == "Total",
+                 .SD,
+                 by = .(Country.code, country = Country.description),
+                 .SDcols = c("X2011","X2012","X2013","X2014","X2015","X2016")]
+
+UKexportGoodsDT <- totalExportsOverYears %>%
+  merge(GBdists, by = "country") %>%
+  merge(GDPbyCountry[,.(Economy, GDP)], 
+        by.x = "country", by.y = "Economy")
+
+setkey(UKexportGoodsDT, "country")
+
+UKexportGoodsDT[, type := "other"]
+UKexportGoodsDT[commonwealthCountries$nation, type := "commonwealth"]
+UKexportGoodsDT[EUCountries$nation, type := "EU"]
+UKexportGoodsDT["United States inc Puerto Rico", type := "USA"]
+
+UK_GDP <- GDPbyCountry[Economy == "United Kingdom", GDP]
+```
+
+Plot
+======
+
+```{r, echo = FALSE, fig.width=26, fig.height=12, fig.align='centre'}
+
+UKexportGoodsDT[X2015 >= 10] %>% 
+  ggplot(aes(x = log10(GDP/dist), y = log10(X2015) )) +
+  geom_point(aes(colour = type, shape = type), size = 3) +
+  geom_smooth(method = "lm") +
+  geom_label_repel(data = head(UKexportGoodsDT[X2015 >= 10][order(dist)], 35),
+                   aes(label = Country.code)) +
+  theme_bw() +
+  labs(title = "UK 2015 exports (goods only) expressed as a gravity trade model",
+       subtitle = "GDP data from the IMF, UK export data from ONS, 95% CI shown",
+       x = "log10(GDP of importing country / distance)", y = "log10(value exported)")
+```
+
+Recall the fit
+================
+
+$$ \log(F_{ij}) = \log(G) + \log(M_i) +  \log \left ( \frac{M_j}{ D_{ij} } \right )$$
+
+```{r}
+
+p2014goodsExports <- UKexportGoodsDT %>% 
+  ggplot(aes(x = log2(GDP/dist), y = log2(X2014) )) +
+  geom_point(aes(colour = type, shape = type), size = 3) +
+  geom_label_repel(aes(label = country)) +
+  theme_bw() +
+  labs(title = "UK 2014 exports (goods only) expressed as a gravity trade model",
+       subtitle = "GDP data from the IMF, UK export data from ONS",
+       x = "log2(GDP of importing country / distance)", y = "log2(value exported)")
+```
+
+Psuedo poisson? Heteroskedascity.
+Services?
+Contrast against Germany?
