@@ -22,7 +22,9 @@ library(readxl)
 library(rvest)
 library(ggrepel)
 library(stringr)
+library(latex2exp)
 library(wesanderson)
+library(lmtest)
 ```
 
 A simple inverse relation between distance and volume of trade
@@ -87,10 +89,11 @@ setnames(GDPbyCountry, "V1", "Code")
 
 GDPbyCountry[, GDP := as.numeric(gsub(",", "", US.dollars.))]
 
-GDPbyCountry["United States",
-             Economy := "United States inc Puerto Rico"]
+GDPbyCountry["United States", Economy := "United States inc Puerto Rico"]
 
-head(GDPbyCountry[,.(Code, Economy, GDP)])
+UK_GDP <- GDPbyCountry[Economy == "United Kingdom", GDP]
+
+GDPbyCountry[1:5, .(Code, Economy, GDP)]
 ```
 
 EU countries can be scraped from Wikipedia
@@ -102,13 +105,15 @@ EUCountries <- "https://en.wikipedia.org/wiki/Member_state_of_the_European_Union
   read_html() %>%
   html_nodes(xpath= '/html/body/div[3]/div[3]/div[4]/div/table[2]') %>%
   html_table() %>%
-  .[[1]]
+  .[[1]] 
 
 setDT(EUCountries)
 setnames(EUCountries, "Country name", "nation")
 
-head(EUCountries[,.(nation, Capital, Accession)])
+EUCountries[1:5, .(nation, Capital, Accession)]
 ```
+
+Likewise with Commonwealth countries
 
 ```{r Commonwealth countries, echo = FALSE}
 
@@ -121,7 +126,6 @@ html_nodes(xpath='/html/body/div[3]/div[3]/div[4]/div/table[1]') %>%
   .[[1]]
 
 setDT(commonwealthCountries)
-
 commonwealthCountries[, nation := str_extract(Country, "[^!]+") %>%
                                   str_remove("\\s+$") %>%
                                   str_remove("\\[D\\]")]
@@ -132,7 +136,7 @@ head(commonwealthCountries[,.(nation, Joined)])
 Big data is bad data!
 =====================
 
-```{r Intrcountry distances, echo=FALSE}
+```{r Intercountry distances, echo=FALSE}
 
 # Inter country data taken from: http://egallic.fr/en/closest-distance-between-countries/
 lesDist <- fread("https://gist.githubusercontent.com/mtriff/185e15be85b44547ed110e412a1771bf/raw/1bb4d287f79ca07f63d4c56110099c26e7c6ee7d/countries_distances.csv")
@@ -157,48 +161,126 @@ UKexportGoodsDT <- totalExportsOverYears %>%
 
 setkey(UKexportGoodsDT, "country")
 
-UKexportGoodsDT[, type := "other"]
-UKexportGoodsDT[commonwealthCountries$nation, type := "commonwealth"]
-UKexportGoodsDT[EUCountries$nation, type := "EU"]
-UKexportGoodsDT["United States inc Puerto Rico", type := "USA"]
+UKexportGoodsDT[, block := "other"]
+UKexportGoodsDT[commonwealthCountries$nation, block := "commonwealth"]
+UKexportGoodsDT[EUCountries$nation, block := "EU"]
+UKexportGoodsDT["United States inc Puerto Rico", block := "USA"]
 
 UK_GDP <- GDPbyCountry[Economy == "United Kingdom", GDP]
 ```
 
-Plot
-======
+UK exports as gravity trade model
+=================================
+
+$$ \log(F_{ij}) = \log(GM_i) +  \log \left ( \frac{M_j}{ D_{ij} } \right ) + \epsilon$$
 
 ```{r, echo = FALSE, fig.width=26, fig.height=12, fig.align='centre'}
 
-UKexportGoodsDT[X2015 >= 10] %>% 
+UKexportGoodsDT[X2015 >= 5] %>% 
   ggplot(aes(x = log10(GDP/dist), y = log10(X2015) )) +
-  geom_point(aes(colour = type, shape = type), size = 3) +
+  geom_point(aes(colour = block, shape = block), size = 5) +
   geom_smooth(method = "lm") +
-  geom_label_repel(data = head(UKexportGoodsDT[X2015 >= 10][order(dist)], 35),
-                   aes(label = Country.code)) +
-  theme_bw() +
-  labs(title = "UK 2015 exports (goods only) expressed as a gravity trade model",
+  geom_label_repel(data = UKexportGoodsDT[X2015 >= 5],
+                   aes(label = Country.code), size = 7) +
+  theme_bw(base_size = 20) +
+  labs(title = "UK 2015 exports (goods only) expressed as a gravity trade model (£millions)",
        subtitle = "GDP data from the IMF, UK export data from ONS, 95% CI shown",
        x = "log10(GDP of importing country / distance)", y = "log10(value exported)")
 ```
 
-Recall the fit
-================
-
-$$ \log(F_{ij}) = \log(G) + \log(M_i) +  \log \left ( \frac{M_j}{ D_{ij} } \right )$$
+Always plot the residuals!
+=========================
 
 ```{r}
 
-p2014goodsExports <- UKexportGoodsDT %>% 
-  ggplot(aes(x = log2(GDP/dist), y = log2(X2014) )) +
-  geom_point(aes(colour = type, shape = type), size = 3) +
-  geom_label_repel(aes(label = country)) +
-  theme_bw() +
-  labs(title = "UK 2014 exports (goods only) expressed as a gravity trade model",
-       subtitle = "GDP data from the IMF, UK export data from ONS",
-       x = "log2(GDP of importing country / distance)", y = "log2(value exported)")
+UKexports_gravityLM <- lm(log10(X2015) ~ log10(GDP/dist), data = UKexportGoodsDT[X2015 > 10])
+
+qplot(x = fitted(UKexports_gravityLM), y = resid(UKexports_gravityLM) ) + 
+  labs(x = "Fitted value [log10(GDP/dist)]", y = "Residual") +
+  theme_bw()
+
+data.table(tidy(bptest(UKexports_gravityLM)))
 ```
 
-Psuedo poisson? Heteroskedascity.
-Services?
-Contrast against Germany?
+The literature states that there is a known heteroskedascity effect in these data. No sign of it from a Breusch-Pagan test.
+
+Heteroskedatic model is not a better fit
+========================================
+
+Quasi-poisson
+Negative binomial 
+
+```{r}
+
+UKexportGoodsDT[X2015 >= 10] %>% 
+  ggplot(aes(x = GDP/dist, y = log10(X2015) )) +
+  geom_point(aes(colour = block, shape = block), size = 5) +
+  geom_smooth(method = "glm.nb", colour = "green", formula = y ~ x ) +
+  geom_smooth(method = "lm", colour = "blue", formula = y ~ x) +
+  scale_x_log10() +
+  theme_bw(base_size = 20)
+```
+
+
+Differential trade
+===================
+
+Some evidence that we trade differentially with commonwealth vs EU
+========================================================================
+
+```{r}
+
+blockwiseTrading_LM <- lm(log10(X2015) ~ block:log10(GDP/dist),
+                          data = UKexportGoodsDT[X2015 > 10 & Country.code != "US"])
+
+# Highlight australia and new zealand
+
+blockwiseTrading_LM %>%
+  tidy(conf.int = TRUE, conf.level = 0.95) %>% 
+  data.table %>%
+  ggplot(aes(x = str_replace_all(term, c('block'="", "\\:log10\\(GDP\\/dist\\)" ="") ), y = estimate)) +
+  geom_errorbar(aes(ymax = conf.high, ymin = conf.low)) +
+  geom_point(size = 5, shape = 21, fill = "white") +
+  labs(y = "Model slope", x = "Trading block",
+       title = "Slope estimates and 95% confidence intervals for gravity model of trade") +
+  theme_bw()
+```
+
+Maybe there's a little bit of evidence too this ...
+
+```{r}
+
+summary(glht(blockwiseTrading_LM, linfct= matrix(c(0,1,-1,0), ncol = 4) ))
+
+
+summary(glht(blockwiseTrading_LM, linfct= matrix(c(0,1,0,-1), ncol = 4) ))
+
+```
+
+# But don't forget about where the important points on the slope are!
+
+Domain of validity!
+
+```{r}
+
+UKexportGoodsDT[X2015 >= 5] %>% 
+  ggplot(aes(x = log(GDP/dist), y = log10(X2015), block = block )) +
+  geom_point(aes(colour = block, shape = block), size = 5) +
+  geom_smooth(data = UKexportGoodsDT[X2015 >= 10 & Country.code != "US"],
+              method = "rlm", aes(colour = block), se = FALSE) +
+  scale_x_log10() +
+  theme_bw(base_size = 20)
+
+```
+
+Next
+=======
+
+But what if there was a way to escape the distance term?
+
+Services (20%)?
+
+Which pallette?
+==============
+
+Grand Budapest
