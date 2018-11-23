@@ -199,7 +199,24 @@ qplot(x = fitted(UKexports_gravityLM), y = resid(UKexports_gravityLM) ) +
   labs(x = "Fitted value [log10(GDP/dist)]", y = "Residual") +
   theme_bw()
 
-data.table(tidy(bptest(UKexports_gravityLM)))
+lm(sqrt(abs(resid(UKexports_gravityLM)))~fitted(UKexports_gravityLM))
+
+qplot(x = fitted(UKexports_gravityLM), y = resid(UKexports_gravityLM)^2 ) + 
+  labs(x = "Fitted value [log10(GDP/dist)]", y = "sqrt(Residual)") +
+   geom_hline(yintercept = coef(lm(resid(UKexports_gravityLM)^2~fitted(UKexports_gravityLM)))[1],     linetype = "dashed") +
+  geom_smooth(method = "lm", fullrange = TRUE) +
+  theme_bw()
+
+UKexports_gravityNB <- glm.nb(X2015 ~ log10(GDP/dist), data = UKexportGoodsDT[X2015 > 10])
+ 
+
+qplot(x = log(fitted(UKexports_gravityNB)), y = resid(UKexports_gravityNB)^2 ) + 
+  labs(x = "Fitted value [log10(GDP/dist)]", y = "sqrt(Residual)") +
+   geom_hline(yintercept = coef(lm(resid(UKexports_gravityNB)^2~fitted(UKexports_gravityNB)))[1],     linetype = "dashed") +
+  geom_smooth(method = "lm", fullrange = TRUE) +
+  theme_bw()
+
+data.table(tidy(bptest(UKexports_gravityNB)))
 ```
 
 The literature states that there is a known heteroskedascity effect in these data. No sign of it from a Breusch-Pagan test.
@@ -272,6 +289,8 @@ UKexportGoodsDT[X2015 >= 5] %>%
   theme_bw(base_size = 20)
 
 ```
+
+Robust estimation primer
 
 Next
 =======
