@@ -1,0 +1,10 @@
+---
+title: "Posit, Python and You!"
+subtitle: PyData Bristol 23-Feb-23
+author: "Adam Sardar"
+format: 
+  revealjs: 
+    theme: blood
+editor: source
+---
+
